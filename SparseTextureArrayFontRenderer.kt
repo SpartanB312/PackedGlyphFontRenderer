@@ -151,37 +151,38 @@ class SparseTextureArrayFontRenderer(
             var startY = 0f
             var chunk = -1
             var shouldSkip = false
-            for (index in text.indices) {
-                if (shouldSkip) {
-                    shouldSkip = false
-                    continue
-                }
-                val char = text[index]
-                if (char == '\n') {
-                    startY += fontHeight
-                    startX = 0f
-                    continue
-                }
-                if (char == '§' || char == '&') {
-                    val next = text.getOrNull(index + 1)
-                    if (next != null) {
-                        val newColor = next.getColor(color)
-                        if (newColor != null) {
-                            currentColor = newColor.alpha(alpha)
-                            shouldSkip = true
-                            continue
+            val drawPoints = mutableListOf<Pair<Int, Int>>()
+            with(context.rendererBuffer.textureArray) {
+                for (index in text.indices) {
+                    if (shouldSkip) {
+                        shouldSkip = false
+                        continue
+                    }
+                    val char = text[index]
+                    if (char == '\n') {
+                        startY += fontHeight
+                        startX = 0f
+                        continue
+                    }
+                    if (char == '§' || char == '&') {
+                        val next = text.getOrNull(index + 1)
+                        if (next != null) {
+                            val newColor = next.getColor(color)
+                            if (newColor != null) {
+                                currentColor = newColor.alpha(alpha)
+                                shouldSkip = true
+                                continue
+                            }
                         }
                     }
-                }
-                val currentChunk = char.code / chunkSize
-                if (currentChunk != chunk) {
-                    chunk = currentChunk
-                    checkChunk(currentChunk)
-                }
-                val data = charDataArray[char.code] ?: continue
-                val endX = startX + data.renderWidth
-                val endY = startY + data.height
-                with(context.rendererBuffer.textureArray) {
+                    val currentChunk = char.code / chunkSize
+                    if (currentChunk != chunk) {
+                        chunk = currentChunk
+                        checkChunk(currentChunk)
+                    }
+                    val data = charDataArray[char.code] ?: continue
+                    val endX = startX + data.renderWidth
+                    val endY = startY + data.height
                     putVertex(
                         endX,
                         startY,
@@ -214,9 +215,10 @@ class SparseTextureArrayFontRenderer(
                         currentChunk,
                         currentColor
                     )
-                    draw(GL11.GL_TRIANGLE_STRIP)
+                    drawPoints.add(multiDrawPoint())
+                    startX += data.width
                 }
-                startX += data.width
+                multiDraw(GL11.GL_TRIANGLE_STRIP, drawPoints, program, checkPoint)
             }
         }
     }
@@ -248,7 +250,7 @@ class SparseTextureArrayFontRenderer(
                 continue
             } else sum += delta
         }
-        return sum // specified scale has already been applied in getWidth(char,scale)
+        return sum + italicAddon * scale// specified scale has already been applied in getWidth(char,scale)
     }
 
     class CharData(
