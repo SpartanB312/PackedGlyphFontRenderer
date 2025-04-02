@@ -1,5 +1,7 @@
 package net.spartanb312.ain.font
 
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap
 import net.spartanb312.ain.RenderContext
 import net.spartanb312.ain.common.SharedDrawBuffers
 import net.spartanb312.ain.context.EngineConfig
@@ -15,6 +17,7 @@ import net.spartanb312.gmath.matrix.scalef
 import net.spartanb312.gmath.matrix.translatef
 import net.spartanb312.gmath.vector.Vec2i
 import org.lwjgl.opengl.GL11
+import org.lwjgl.opengl.GL14C
 import org.lwjgl.opengl.GL45
 import org.lwjgl.opengl.GL46.*
 import java.awt.Color
@@ -45,6 +48,7 @@ class UnicodeFontRenderer(
             processRequests(defMaxCount)
         }
         subscribe()
+        println(batchMethod.name)
     }
 
     private val initRequests = LinkedBlockingQueue<Char>()
@@ -320,11 +324,10 @@ class UnicodeFontRenderer(
             var startY = 0f
             var shouldSkip = false
             var currentTex = -1
-            val usedPages = mutableMapOf<Int, Int>() // tex, charCount
-            val startPointers = mutableMapOf<Int, Int>() // tex, pointer
-            val endPointers = mutableMapOf<Int, Int>() // tex, pointer
+            val usedPages = Int2IntOpenHashMap() // tex, charCount
+            val startPointers = Int2IntOpenHashMap() // tex, pointer
+            val endPointers = Int2IntOpenHashMap() // tex, pointer
             with(SharedDrawBuffers.P2CT) {
-                checkPoint.updateMatrix()
                 for (char in text) {
                     val data = getCharData(char) ?: continue
                     usedPages[data.layer] = (usedPages[data.layer] ?: 0) + 1
@@ -417,15 +420,14 @@ class UnicodeFontRenderer(
                     pointer[start + 94] = (data.v1 * 65535f).toInt().toShort()
                     startX += data.width
                 }
+                program.bind()
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, RenderContext.matCheckPoint.matrixUBO.ubo.id)
+                checkPoint.updateMatrix()
+                glBindVertexArray(vao.id)
                 for ((tex, start) in startPointers) {
                     val end = endPointers[tex]!!
                     if (end - start > 0) {
-                        program.bind()
-                        program.applyBinding {
-                            sampler("inputTex", tex)
-                            buffer(RenderContext.matCheckPoint.binding)
-                        }
-                        glBindVertexArray(vao.id)
+                        GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex)
                         GL11.glDrawArrays(
                             GL11.GL_TRIANGLES,
                             ((basePointer + start) / 16).toInt(),
@@ -466,7 +468,7 @@ class UnicodeFontRenderer(
             var startY = 0f
             var shouldSkip = false
             var currentTex = -1
-            val multiDrawBatchMap = mutableMapOf<Int, MutableList<Pair<Int, Int>>>() // page, <first, count>
+            val multiDrawBatchMap = Int2ObjectOpenHashMap<MutableList<Pair<Int, Int>>>() // page, <first, count>
             with(SharedDrawBuffers.P2CT) {
                 checkPoint.updateMatrix()
                 buffer.setToCurrent()
@@ -560,6 +562,10 @@ class UnicodeFontRenderer(
                     val list = multiDrawBatchMap.getOrPut(currentTex) { mutableListOf() }
                     list.add(multiDrawPointData())
                 }
+                program.bind()
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, RenderContext.matCheckPoint.matrixUBO.ubo.id)
+                checkPoint.updateMatrix()
+                glBindVertexArray(vao.id)
                 for ((tex, data) in multiDrawBatchMap) {
                     val first = IntArray(data.size)
                     val counts = IntArray(data.size)
@@ -567,10 +573,8 @@ class UnicodeFontRenderer(
                         first[index] = pair.first
                         counts[index] = pair.second
                     }
-                    multiDraw(GL11.GL_TRIANGLES, first, counts, program, {
-                        sampler("inputTex", tex)
-                        buffer(RenderContext.matCheckPoint.binding)
-                    }, checkPoint)
+                    GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex)
+                    GL14C.glMultiDrawArrays(GL11.GL_TRIANGLES, first, counts)
                 }
             }
         }
